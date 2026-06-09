@@ -1,7 +1,7 @@
 import requests
 
-BASE_URL = "https://listo-backend-1.onrender.com/api"
-# O usa "http://localhost:XXXX/api" si tu backend local corre ahí
+BASE_URL = "http://localhost:5115/api"
+# BASE_URL = "https://listo-backend-1.onrender.com/api"
 
 class ApiService:
     @staticmethod
@@ -119,3 +119,61 @@ class ApiService:
             return {"success": False, "message": "Error al enviar cupón"}
         except Exception as e:
             return {"success": False, "message": str(e)}
+
+    @staticmethod
+    def get_usuario_esperando():
+        url = f"{BASE_URL}/usuario/esperando"
+        try:
+            response = requests.get(url, timeout=5)
+            if response.status_code == 200:
+                return response.json().get("data")
+            return None
+        except:
+            return None
+
+    @staticmethod
+    def get_usuarios_en_tienda():
+        url = f"{BASE_URL}/usuario/en-tienda"
+        try:
+            response = requests.get(url, timeout=5)
+            if response.status_code == 200:
+                return response.json().get("data", [])
+            return []
+        except:
+            return []
+
+    @staticmethod
+    def asignar_track(usuario_id, track_id):
+        url = f"{BASE_URL}/usuario/asignar-track"
+        payload = {
+            "idUsuario": usuario_id,
+            "trackId": str(track_id)
+        }
+        try:
+            response = requests.post(url, json=payload, timeout=5)
+            if response.status_code == 200:
+                return True
+            return False
+        except:
+            return False
+
+    @staticmethod
+    def remover_carrito(usuario_id, label):
+        url = f"{BASE_URL}/carrito/remover"
+        payload = {
+            "UsuarioId": usuario_id,
+            "YoloLabel": label,
+            "Confidence": 1.0
+        }
+        try:
+            requests.post(url, json=payload, timeout=5)
+        except Exception as e:
+            print("Error al remover del carrito:", e)
+
+    @staticmethod
+    def finalizar_compra(usuario_id):
+        url = f"{BASE_URL}/carrito/finalizar"
+        try:
+            requests.post(url, json=usuario_id, timeout=5)
+        except Exception as e:
+            print("Error al finalizar compra:", e)
