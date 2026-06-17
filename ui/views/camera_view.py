@@ -38,8 +38,26 @@ class CameraView(ctk.CTkFrame):
         self.lbl_active_users = ctk.CTkLabel(self.right_panel, text="Ninguno", justify="left")
         self.lbl_active_users.pack(pady=10, padx=10, fill="x")
 
-        self.btn_toggle_cam = ctk.CTkButton(self, text="Encender Cámara", command=self.toggle_camera)
+        self.btn_toggle_cam = ctk.CTkButton(self.right_panel, text="Encender Cámara", command=self.toggle_camera)
         self.btn_toggle_cam.pack(pady=10)
+
+        self.btn_limpiar = ctk.CTkButton(
+            self.right_panel, text="Limpiar Tienda", 
+            fg_color="#FF5A1F", hover_color="#E64A19",
+            command=self.limpiar_tienda
+        )
+        self.btn_limpiar.pack(pady=10)
+
+    def limpiar_tienda(self):
+        exito = ApiService.limpiar_tienda()
+        if exito:
+            print("Tienda limpiada. Todos los usuarios han sido reseteados.")
+            import tkinter.messagebox as messagebox
+            messagebox.showinfo("Éxito", "La tienda ha sido limpiada.")
+            if hasattr(self, 'track_to_user_map'):
+                self.track_to_user_map.clear()
+        else:
+            print("Error al limpiar tienda.")
 
     def toggle_camera(self):
         if not self.running:
@@ -56,6 +74,7 @@ class CameraView(ctk.CTkFrame):
             self.yolo_running = False
             self.active_tracks = {} # Diccionario para mantener Track IDs y su timestamp
             self.track_to_user_map = {} # Mapeo {track_id: usuario_id}
+            self.notified_users = set() # Usuarios que ya mostraron toast de ingreso
 
             # HILO 1: Leer la cámara constantemente
             def camera_reader():
@@ -84,7 +103,8 @@ class CameraView(ctk.CTkFrame):
                         
                         try:
                             results = self.model.track(frame_copy, persist=True, tracker="bytetrack.yaml", verbose=False)
-                            annotated_frame = results[0].plot()
+                            # Ya no usamos plot() de YOLO para evitar textos duplicados
+                            annotated_frame = frame_copy.copy()
                             
                             # Dibujar línea de salida (X = 500)
                             cv2.line(annotated_frame, (500, 0), (500, 480), (0, 0, 255), 2)
@@ -97,21 +117,44 @@ class CameraView(ctk.CTkFrame):
                                 track_ids = boxes.id.cpu().numpy().astype(int)
                                 clss = boxes.cls.cpu().numpy().astype(int)
                                 xyxys = boxes.xyxy.cpu().numpy()
+                                confs = boxes.conf.cpu().numpy()
                                 
                                 current_persons = {}
                                 current_products = {}
 
-                                for track_id, cls_id, bbox in zip(track_ids, clss, xyxys):
+                                for track_id, cls_id, bbox, conf in zip(track_ids, clss, xyxys, confs):
                                     class_name = self.model.names[cls_id]
                                     
-                                    if class_name == "person":
+                                    if class_name == "person" or class_name == "persona":
                                         current_persons[track_id] = bbox
                                         self.active_tracks[track_id] = time.time()
                                         
-                                        # Dibujar el Usuario Asignado directamente en el video
                                         uid = self.track_to_user_map.get(track_id)
+                                        # Buscar el nombre en self.backend_users
+                                        nombre = "Desconocido"
+                                        for u in self.backend_users:
+                                            u_id = u.get("idUsuario") or u.get("IDUsuario") or u.get("idusuario")
+                                            if u_id == uid:
+                                                nombre = u.get("nombre") or u.get("Nombre") or "Desconocido"
+                                                break
+                                                
+                                        # Dibujar etiqueta manual y caja
                                         if uid:
-                                            cv2.putText(annotated_frame, f"Usuario Listo: {uid}", (int(bbox[0]), int(bbox[1]) - 10), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 0), 3)
+                                            label_text = f"{nombre} (ID: {uid}) {conf:.2f}"
+                                            color = (0, 255, 0) # Verde si está asignado
+                                        else:
+                                            label_text = f"Persona (Track: {track_id}) {conf:.2f}"
+                                            color = (0, 255, 255) # Amarillo si no
+                                            
+                                        # Dibujar caja
+                                        cv2.rectangle(annotated_frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), color, 2)
+                                        
+                                        # Dibujar fondo para el texto para mayor visibilidad
+                                        (text_w, text_h), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+                                        cv2.rectangle(annotated_frame, (int(bbox[0]), int(bbox[1]) - 30), (int(bbox[0]) + text_w, int(bbox[1])), color, -1)
+                                        
+                                        # Dibujar texto
+                                        cv2.putText(annotated_frame, label_text, (int(bbox[0]), int(bbox[1]) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 0), 2)
 
                                         # Paso 10: Salida de la tienda
                                         # Si el centro de la persona cruza X=500
@@ -126,6 +169,15 @@ class CameraView(ctk.CTkFrame):
                                                 del self.track_to_user_map[track_id]
                                     else:
                                         current_products[track_id] = (class_name, bbox)
+                                        label_text = f"{class_name} {conf:.2f}"
+                                        p_color = (255, 0, 0) # Azul para productos
+                                        
+                                        cv2.rectangle(annotated_frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), p_color, 2)
+                                        
+                                        (tw, th), _ = cv2.getTextSize(label_text, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 2)
+                                        cv2.rectangle(annotated_frame, (int(bbox[0]), int(bbox[1]) - 25), (int(bbox[0]) + tw, int(bbox[1])), p_color, -1)
+                                        
+                                        cv2.putText(annotated_frame, label_text, (int(bbox[0]), int(bbox[1]) - 8), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
 
                                 # Paso 9: Lógica Tomar/Devolver
                                 current_time = time.time()
@@ -202,7 +254,13 @@ class CameraView(ctk.CTkFrame):
                         for user in usuarios_en_tienda:
                             id_usuario = user.get("idUsuario") or user.get("IDUsuario") or user.get("idusuario")
                             estado_sesion = user.get("estadoSesion") or user.get("EstadoSesion")
+                            nombre_usuario = user.get("nombre") or user.get("Nombre") or "Desconocido"
                             
+                            # NOTIFICACIÓN TEMPORAL DE INGRESO
+                            if estado_sesion == "EsperandoAsignacion" and id_usuario and id_usuario not in self.notified_users:
+                                self.notified_users.add(id_usuario)
+                                self.after(0, lambda n=nombre_usuario, i=id_usuario: self.show_toast_notification(n, i))
+
                             if id_usuario and id_usuario not in assigned_user_ids:
                                 # Este usuario está en la tienda pero no tiene track asignado
                                 unassigned_tracks = [t_id for t_id in self.active_tracks.keys() if t_id not in self.track_to_user_map]
@@ -265,10 +323,13 @@ class CameraView(ctk.CTkFrame):
                                 assigned_track = tid
                                 break
                         
+                        carrito = user.get("carrito") or user.get("Carrito") or []
+                        carrito_text = f"Carrito: [{', '.join(carrito)}]" if carrito else "Carrito vacío"
+                        
                         if assigned_track is not None:
-                            users_text += f"> {nombre} (Track {assigned_track})\n"
+                            users_text += f"> {nombre} (ID: {uid}) - Track: {assigned_track} | {carrito_text}\n"
                         else:
-                            users_text += f"> {nombre} (Buscando...)\n"
+                            users_text += f"> {nombre} (ID: {uid}) - Buscando... | {carrito_text}\n"
                             
                     self.lbl_active_users.configure(text=users_text)
                 else:
@@ -284,3 +345,15 @@ class CameraView(ctk.CTkFrame):
         self.running = False
         if self.cap:
             self.cap.release()
+
+    def show_toast_notification(self, nombre, id_usuario):
+        toast = ctk.CTkFrame(self.main_container, fg_color="#2b2b2b", corner_radius=10, border_width=2, border_color="#FF5A1F")
+        # Posicionarlo en la parte superior, centrado
+        toast.place(relx=0.5, rely=0.05, anchor="n")
+        
+        lbl = ctk.CTkLabel(toast, text=f"¡El usuario {nombre} (ID: {id_usuario}) validó su PIN y va a entrar!", 
+                           font=ctk.CTkFont(size=16, weight="bold"), text_color="white")
+        lbl.pack(padx=20, pady=15)
+        
+        # Eliminar el toast después de 5 segundos
+        self.after(5000, toast.destroy)

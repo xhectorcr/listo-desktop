@@ -17,8 +17,19 @@ class ApiService:
             return {"success": False, "message": str(e)}
 
     @staticmethod
-    def get_usuarios(page=1, size=50):
-        url = f"{BASE_URL}/usuario/lista/activos?pageNumber={page}&pageSize={size}"
+    def get_usuarios(page=1, size=50, search=""):
+        url = f"{BASE_URL}/usuario/lista/activos?pageNumber={page}&pageSize={size}&pSearch={search}"
+        try:
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                return response.json().get("data", [])
+            return []
+        except:
+            return []
+
+    @staticmethod
+    def get_usuarios_inactivos(search=""):
+        url = f"{BASE_URL}/usuario/lista/inactivos?pSearch={search}"
         try:
             response = requests.get(url, timeout=10)
             if response.status_code == 200:
@@ -177,3 +188,36 @@ class ApiService:
             requests.post(url, json=usuario_id, timeout=5)
         except Exception as e:
             print("Error al finalizar compra:", e)
+
+    @staticmethod
+    def suspender_usuario(usuario_id):
+        url = f"{BASE_URL}/usuario/suspender/{usuario_id}"
+        try:
+            response = requests.delete(url, timeout=10)
+            if response.status_code == 200:
+                return response.json()
+            return {"success": False, "message": "Error al suspender usuario"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+
+    @staticmethod
+    def reactivar_usuario(usuario_id):
+        url = f"{BASE_URL}/usuario/reactivar/{usuario_id}"
+        try:
+            response = requests.put(url, timeout=10)
+            if response.status_code == 200:
+                return response.json()
+            return {"success": False, "message": "Error al reactivar usuario"}
+        except Exception as e:
+            return {"success": False, "message": str(e)}
+    @staticmethod
+    def limpiar_tienda():
+        url = f"{BASE_URL}/usuario/limpiar-tienda"
+        try:
+            response = requests.post(url, timeout=5)
+            if response.status_code == 200:
+                return True
+            return False
+        except Exception as e:
+            print("Error al limpiar tienda:", e)
+            return False
