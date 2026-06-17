@@ -1,11 +1,11 @@
 import customtkinter as ctk
-import threading
-from services.api_service import ApiService
+from controllers.login_controller import LoginController
 
 class LoginView(ctk.CTkFrame):
     def __init__(self, master, on_login_success):
         super().__init__(master, fg_color="transparent")
         self.on_login_success = on_login_success
+        self.controller = LoginController()
 
         # Container principal centrado
         self.container = ctk.CTkFrame(self, width=550, height=520, corner_radius=20)
@@ -57,25 +57,26 @@ class LoginView(ctk.CTkFrame):
         self.btn_login.pack(fill="x", padx=40, pady=(10, 40))
 
     def handle_login(self):
-        correo = self.correo_entry.get().strip()
+        correo = self.correo_entry.get()
         password = self.password_entry.get()
 
-        if not correo or not password:
-            self.error_label.configure(text="Por favor ingresa correo y contraseña")
-            return
-
+        # UI state changes
         self.btn_login.configure(state="disabled", text="Cargando...")
         self.error_label.configure(text="")
 
-        def authenticate():
-            result = ApiService.login(correo, password)
-            if result.get("success"):
-                self.after(0, self.on_login_success)
-            else:
-                error_msg = result.get("message", "Error al iniciar sesión")
-                self.after(0, lambda: self.show_error(error_msg))
+        # Usar after(0, callback) para volver al main thread al modificar la UI
+        def _on_success():
+            self.after(0, self.on_login_success)
 
-        threading.Thread(target=authenticate, daemon=True).start()
+        def _on_error(message: str):
+            self.after(0, lambda: self.show_error(message))
+
+        self.controller.handle_login(
+            correo=correo, 
+            password=password, 
+            on_success=_on_success, 
+            on_error=_on_error
+        )
 
     def show_error(self, message):
         self.error_label.configure(text=message)

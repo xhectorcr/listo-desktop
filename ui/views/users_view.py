@@ -1,11 +1,12 @@
 import customtkinter as ctk
-import threading
 import tkinter.messagebox as messagebox
-from services.api_service import ApiService
+from controllers.users_controller import UsersController
+from domain.models.user import User
 
 class UsersView(ctk.CTkFrame):
     def __init__(self, master):
         super().__init__(master, fg_color="transparent")
+        self.controller = UsersController()
 
         # Top section: Header and Stats
         self.top_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -112,12 +113,10 @@ class UsersView(ctk.CTkFrame):
 
         search_query = self.search_entry.get().strip()
 
-        def fetch():
-            users_activos = ApiService.get_usuarios(page=1, size=100, search=search_query)
-            users_inactivos = ApiService.get_usuarios_inactivos(search=search_query)
-            self.after(0, lambda: self.render_users(users_activos, users_inactivos, loading_act, loading_susp))
+        def _on_success(activos: list[User], inactivos: list[User]):
+            self.after(0, lambda: self.render_users(activos, inactivos, loading_act, loading_susp))
 
-        threading.Thread(target=fetch, daemon=True).start()
+        self.controller.load_users(search_query, _on_success)
 
     def render_users(self, activos, inactivos, lbl_act, lbl_susp):
         lbl_act.destroy()
@@ -133,15 +132,12 @@ class UsersView(ctk.CTkFrame):
 
         # Render Activos
         for user in activos:
-            saldo = float(user.get("saldo", 0) or 0)
-            estrellas = int(user.get("estrellas", 0) or 0)
-            sum_saldo += saldo
-            sum_estrellas += estrellas
+            sum_saldo += user.saldo
+            sum_estrellas += user.estrellas
             self.create_user_card(user, self.scroll_activos).pack(fill="x", pady=5)
 
         # Render Inactivos
         for user in inactivos:
-            user["activo"] = False # Ensure it's marked correctly
             self.create_user_card(user, self.scroll_suspendidos).pack(fill="x", pady=5)
 
         total_activos = len(activos)
@@ -150,19 +146,12 @@ class UsersView(ctk.CTkFrame):
 
         self.update_stats(total_activos, total_suspendidos, avg_saldo, sum_estrellas)
 
-    def create_user_card(self, user, parent_container):
-        nombre = user.get('nombre', 'Sin nombre')
-        correo = user.get('correo', 'Sin correo')
-        uid = str(user.get('idUsuario', user.get('id', 'N/A')))
-        saldo = float(user.get("saldo", 0) or 0)
-        estrellas = int(user.get("estrellas", 0) or 0)
-        activo = user.get("estado", user.get("activo", True))
-
+    def create_user_card(self, user: User, parent_container):
         card = ctk.CTkFrame(parent_container, corner_radius=8, fg_color="#2b2b2b")
         
         # Initial circle
-        initial = nombre[0].upper() if nombre else "U"
-        circle = ctk.CTkFrame(card, width=40, height=40, corner_radius=20, fg_color="#FF5A1F" if activo else "gray")
+        initial = user.nombre[0].upper() if user.nombre and user.nombre != 'Sin nombre' else "U"
+        circle = ctk.CTkFrame(card, width=40, height=40, corner_radius=20, fg_color="#FF5A1F" if user.activo else "gray")
         circle.pack(side="left", padx=15, pady=15)
         circle.pack_propagate(False)
         ctk.CTkLabel(circle, text=initial, text_color="white", font=ctk.CTkFont(weight="bold")).place(relx=0.5, rely=0.5, anchor="center")
@@ -171,56 +160,52 @@ class UsersView(ctk.CTkFrame):
         info_frame = ctk.CTkFrame(card, fg_color="transparent")
         info_frame.pack(side="left", fill="x", expand=True, pady=10)
 
-        ctk.CTkLabel(info_frame, text=nombre, font=ctk.CTkFont(weight="bold", size=14)).pack(anchor="w")
-        ctk.CTkLabel(info_frame, text=f"ID: {uid} | {correo}", text_color="gray", font=ctk.CTkFont(size=12)).pack(anchor="w")
+        ctk.CTkLabel(info_frame, text=user.nombre, font=ctk.CTkFont(weight="bold", size=14)).pack(anchor="w")
+        ctk.CTkLabel(info_frame, text=f"ID: {user.id_usuario} | {user.correo}", text_color="gray", font=ctk.CTkFont(size=12)).pack(anchor="w")
 
         # Status & Balances
         right_frame = ctk.CTkFrame(card, fg_color="transparent")
         right_frame.pack(side="right", padx=15, pady=10)
 
-        status_text = "Activo" if activo else "Suspendido"
-        status_color = "green" if activo else "red"
+        status_text = "Activo" if user.activo else "Suspendido"
+        status_color = "green" if user.activo else "red"
         ctk.CTkLabel(right_frame, text=status_text, text_color=status_color, font=ctk.CTkFont(weight="bold")).pack(anchor="e")
-        ctk.CTkLabel(right_frame, text=f"S/ {saldo:.2f} | {estrellas} ⭐", font=ctk.CTkFont(size=12)).pack(anchor="e")
+        ctk.CTkLabel(right_frame, text=f"S/ {user.saldo:.2f} | {user.estrellas} ⭐", font=ctk.CTkFont(size=12)).pack(anchor="e")
 
-        if activo and uid != 'N/A':
+        if user.activo and user.id_usuario != 'N/A':
             btn_suspender = ctk.CTkButton(
                 right_frame, text="Suspender", width=80, height=24,
                 fg_color="red", hover_color="#8B0000",
-                command=lambda u=uid: self.suspender_usuario(u)
+                command=lambda u=user.id_usuario: self.suspender_usuario(u)
             )
             btn_suspender.pack(anchor="e", pady=(5, 0))
-        elif not activo and uid != 'N/A':
+        elif not user.activo and user.id_usuario != 'N/A':
             btn_activar = ctk.CTkButton(
                 right_frame, text="Activar", width=80, height=24,
                 fg_color="green", hover_color="#006400",
-                command=lambda u=uid: self.reactivar_usuario(u)
+                command=lambda u=user.id_usuario: self.reactivar_usuario(u)
             )
             btn_activar.pack(anchor="e", pady=(5, 0))
 
         return card
 
     def suspender_usuario(self, uid):
-        def do_suspend():
-            res = ApiService.suspender_usuario(uid)
-            if res and res.get("success"):
-                messagebox.showinfo("Éxito", "Usuario suspendido correctamente.")
+        def _on_complete(success: bool, msg: str):
+            if success:
+                self.after(0, lambda: messagebox.showinfo("Éxito", msg))
                 self.after(0, self.load_users)
             else:
-                msg = res.get("message") if res else "Desconocido"
-                messagebox.showerror("Error", f"Error al suspender: {msg}")
-        
-        threading.Thread(target=do_suspend, daemon=True).start()
+                self.after(0, lambda: messagebox.showerror("Error", f"Error al suspender: {msg}"))
+
+        self.controller.suspender_usuario(uid, _on_complete)
 
     def reactivar_usuario(self, uid):
-        def do_reactivar():
-            res = ApiService.reactivar_usuario(uid)
-            if res and res.get("success"):
-                messagebox.showinfo("Éxito", "Usuario activado correctamente.")
+        def _on_complete(success: bool, msg: str):
+            if success:
+                self.after(0, lambda: messagebox.showinfo("Éxito", msg))
                 self.after(0, self.load_users)
             else:
-                msg = res.get("message") if res else "Desconocido"
-                messagebox.showerror("Error", f"Error al activar: {msg}")
-        
-        threading.Thread(target=do_reactivar, daemon=True).start()
+                self.after(0, lambda: messagebox.showerror("Error", f"Error al activar: {msg}"))
+
+        self.controller.reactivar_usuario(uid, _on_complete)
 

@@ -1,10 +1,11 @@
 import customtkinter as ctk
-import threading
-from services.api_service import ApiService
+from controllers.rewards_controller import RewardsController
+from domain.models.user import User
 
 class PremiosView(ctk.CTkFrame):
     def __init__(self, master):
         super().__init__(master, fg_color="transparent")
+        self.controller = RewardsController()
         
         self.sent_coupons = 14 # Simulation count
         self.sending_states = {}
@@ -82,13 +83,12 @@ class PremiosView(ctk.CTkFrame):
         loading_lbl = ctk.CTkLabel(self.scroll_frame, text="Cargando clientes...")
         loading_lbl.pack(pady=20)
 
-        def fetch():
-            users = ApiService.get_usuarios(page=1, size=100)
+        def _on_success(users: list[User]):
             self.after(0, lambda: self.render_users(users, loading_lbl))
 
-        threading.Thread(target=fetch, daemon=True).start()
+        self.controller.load_users(_on_success)
 
-    def render_users(self, users, loading_lbl):
+    def render_users(self, users: list[User], loading_lbl):
         loading_lbl.destroy()
         
         self.stat_clientes.value_label.configure(text=str(len(users)))
@@ -100,15 +100,10 @@ class PremiosView(ctk.CTkFrame):
         for user in users:
             self.create_user_card(user).pack(fill="x", pady=5)
 
-    def create_user_card(self, user):
-        nombre = user.get('nombre', 'Sin nombre')
-        correo = user.get('correo', 'Sin correo')
-        uid = str(user.get('idUsuario', user.get('id', 'N/A')))
-        estrellas = int(user.get("estrellas", 0) or 0)
-
+    def create_user_card(self, user: User):
         card = ctk.CTkFrame(self.scroll_frame, corner_radius=8, fg_color="#2b2b2b")
         
-        initial = nombre[0].upper() if nombre else "C"
+        initial = user.nombre[0].upper() if user.nombre and user.nombre != 'Sin nombre' else "C"
         circle = ctk.CTkFrame(card, width=40, height=40, corner_radius=20, fg_color="#FF5A1F")
         circle.pack(side="left", padx=15, pady=15)
         circle.pack_propagate(False)
@@ -117,8 +112,8 @@ class PremiosView(ctk.CTkFrame):
         info_frame = ctk.CTkFrame(card, fg_color="transparent")
         info_frame.pack(side="left", fill="x", expand=True, pady=10)
 
-        ctk.CTkLabel(info_frame, text=nombre, font=ctk.CTkFont(weight="bold", size=14)).pack(anchor="w")
-        ctk.CTkLabel(info_frame, text=f"{correo} | {estrellas} ⭐", text_color="gray", font=ctk.CTkFont(size=12)).pack(anchor="w")
+        ctk.CTkLabel(info_frame, text=user.nombre, font=ctk.CTkFont(weight="bold", size=14)).pack(anchor="w")
+        ctk.CTkLabel(info_frame, text=f"{user.correo} | {user.estrellas} ⭐", text_color="gray", font=ctk.CTkFont(size=12)).pack(anchor="w")
 
         right_frame = ctk.CTkFrame(card, fg_color="transparent")
         right_frame.pack(side="right", padx=15, pady=10)
@@ -134,24 +129,23 @@ class PremiosView(ctk.CTkFrame):
         btn_send.pack(side="bottom")
 
         def send_to_user():
+            uid = user.id_usuario
             if self.sending_states.get(uid): return
             self.sending_states[uid] = True
             btn_send.configure(state="disabled", text="Enviando...")
             lbl_status.configure(text="")
 
-            def task():
-                res = ApiService.enviar_cupon(correo)
-                def on_done():
-                    self.sending_states[uid] = False
-                    if res.get("success"):
-                        btn_send.configure(text="¡Enviado!", fg_color="green")
-                        self.sent_coupons += 1
-                        self.stat_enviados.value_label.configure(text=str(self.sent_coupons))
-                    else:
-                        btn_send.configure(state="normal", text="Reintentar")
-                        lbl_status.configure(text="Falló el envío", text_color="red")
-                self.after(0, on_done)
-            threading.Thread(target=task, daemon=True).start()
+            def _on_complete(success: bool, msg: str):
+                self.sending_states[uid] = False
+                if success:
+                    self.after(0, lambda: btn_send.configure(text="¡Enviado!", fg_color="green"))
+                    self.sent_coupons += 1
+                    self.after(0, lambda: self.stat_enviados.value_label.configure(text=str(self.sent_coupons)))
+                else:
+                    self.after(0, lambda: btn_send.configure(state="normal", text="Reintentar"))
+                    self.after(0, lambda: lbl_status.configure(text="Falló el envío", text_color="red"))
+
+            self.controller.send_coupon(user.correo, _on_complete)
 
         btn_send.configure(command=send_to_user)
         return card
@@ -165,16 +159,14 @@ class PremiosView(ctk.CTkFrame):
         self.btn_send_manual.configure(state="disabled", text="Enviando...")
         self.lbl_manual_status.configure(text="")
 
-        def task():
-            res = ApiService.enviar_cupon(email)
-            def on_done():
-                self.btn_send_manual.configure(state="normal", text="Enviar")
-                if res.get("success"):
-                    self.lbl_manual_status.configure(text="¡Cupón enviado exitosamente!", text_color="green")
-                    self.ent_email_manual.delete(0, 'end')
-                    self.sent_coupons += 1
-                    self.stat_enviados.value_label.configure(text=str(self.sent_coupons))
-                else:
-                    self.lbl_manual_status.configure(text=res.get("message", "Error al enviar"), text_color="red")
-            self.after(0, on_done)
-        threading.Thread(target=task, daemon=True).start()
+        def _on_complete(success: bool, msg: str):
+            self.after(0, lambda: self.btn_send_manual.configure(state="normal", text="Enviar"))
+            if success:
+                self.after(0, lambda: self.lbl_manual_status.configure(text="¡Cupón enviado exitosamente!", text_color="green"))
+                self.after(0, lambda: self.ent_email_manual.delete(0, 'end'))
+                self.sent_coupons += 1
+                self.after(0, lambda: self.stat_enviados.value_label.configure(text=str(self.sent_coupons)))
+            else:
+                self.after(0, lambda: self.lbl_manual_status.configure(text=msg, text_color="red"))
+
+        self.controller.send_coupon(email, _on_complete)

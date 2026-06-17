@@ -8,3 +8,6 @@ class Config:
     # API Settings
     API_BASE_URL = "https://listo-backend-1.onrender.com/api"
     # API_BASE_URL = "http://localhost:5115/api"
+    
+    # HTTP Client Settings
+    HTTP_TIMEOUT_SECONDS = 10
