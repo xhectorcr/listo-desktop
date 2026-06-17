@@ -9,9 +9,9 @@ class RewardsController:
         self.user_service = user_service or UserService()
         self.reward_service = reward_service or RewardService()
 
-    def load_users(self, on_success: Callable[[List[User]], None]):
+    def load_users(self, page: int, on_success: Callable[[List[User]], None]):
         def _fetch():
-            activos, _ = self.user_service.obtener_resumen_usuarios()
+            activos, _ = self.user_service.obtener_resumen_usuarios(page=page, size=15)
             on_success(activos)
         threading.Thread(target=_fetch, daemon=True).start()
 

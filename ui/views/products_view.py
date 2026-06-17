@@ -1,5 +1,6 @@
 import customtkinter as ctk
 import tkinter.messagebox as messagebox
+import functools
 from controllers.products_controller import ProductsController
 from domain.models.product import Product, Category
 
@@ -8,6 +9,8 @@ class ProductsView(ctk.CTkFrame):
         super().__init__(master, fg_color="transparent")
         self.controller = ProductsController()
         self.categories = []
+        self.current_page = 1
+        self.cards_pool = []
 
         # Top section: Header
         self.top_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -35,7 +38,7 @@ class ProductsView(ctk.CTkFrame):
             self.filters_frame, text="Actualizar", 
             fg_color="#333333", hover_color="#444444",
             width=100,
-            command=self.load_products
+            command=self.force_reload
         )
         self.btn_refresh.pack(side="left")
 
@@ -47,36 +50,70 @@ class ProductsView(ctk.CTkFrame):
         self.pagination_frame = ctk.CTkFrame(self, fg_color="transparent")
         self.pagination_frame.pack(fill="x", padx=20, pady=(0, 10))
         
+        self.btn_prev = ctk.CTkButton(self.pagination_frame, text="<", width=30, command=self.prev_page)
+        self.btn_prev.pack(side="left", padx=5)
+
         self.lbl_page = ctk.CTkLabel(self.pagination_frame, text="Página 1", text_color="gray")
-        self.lbl_page.pack(side="left")
+        self.lbl_page.pack(side="left", padx=10)
+
+        self.btn_next = ctk.CTkButton(self.pagination_frame, text=">", width=30, command=self.next_page)
+        self.btn_next.pack(side="left", padx=5)
+
+        self.loading_lbl = ctk.CTkLabel(self.scroll_frame, text="Cargando productos y categorías...")
 
         # Load data initially
         self.load_products()
 
+    def force_reload(self):
+        self.current_page = 1
+        self.load_products()
+
+    def prev_page(self):
+        if self.current_page > 1:
+            self.current_page -= 1
+            self.load_products()
+
+    def next_page(self):
+        self.current_page += 1
+        self.load_products()
+
     def load_products(self):
-        for widget in self.scroll_frame.winfo_children():
-            widget.destroy()
+        for card in self.cards_pool:
+            card.pack_forget()
             
-        loading_lbl = ctk.CTkLabel(self.scroll_frame, text="Cargando productos y categorías...")
-        loading_lbl.pack(pady=20)
+        self.loading_lbl.pack(pady=20)
+        self.lbl_page.configure(text=f"Página {self.current_page}")
 
         def _on_success(products: list[Product], categories: list[Category]):
             self.categories = categories
-            self.after(0, lambda: self.render_products(products, loading_lbl))
+            self.after(0, lambda: self.render_products(products))
 
-        self.controller.load_data(_on_success)
+        self.controller.load_data(self.current_page, _on_success)
 
-    def render_products(self, products: list[Product], loading_lbl):
-        loading_lbl.destroy()
+    def render_products(self, products: list[Product]):
+        self.loading_lbl.pack_forget()
         
         if not products:
-            ctk.CTkLabel(self.scroll_frame, text="No se encontraron productos.", text_color="gray").pack(pady=20)
+            if self.current_page > 1:
+                self.current_page -= 1
+                self.after(0, lambda: messagebox.showinfo("Fin", "No hay más productos."))
+                self.load_products()
+            else:
+                self.loading_lbl.configure(text="No se encontraron productos.")
+                self.loading_lbl.pack(pady=20)
             return
 
-        for prod in products:
-            self.create_product_card(prod).pack(fill="x", pady=5)
+        self.loading_lbl.configure(text="Cargando productos y categorías...")
 
-    def create_product_card(self, prod: Product):
+        while len(self.cards_pool) < len(products):
+            self.cards_pool.append(self._create_empty_card())
+
+        for i, prod in enumerate(products):
+            card = self.cards_pool[i]
+            self._update_card(card, prod)
+            card.pack(fill="x", pady=5)
+
+    def _create_empty_card(self):
         card = ctk.CTkFrame(self.scroll_frame, corner_radius=8, fg_color="#2b2b2b")
         
         # Icon
@@ -89,28 +126,50 @@ class ProductsView(ctk.CTkFrame):
         info_frame = ctk.CTkFrame(card, fg_color="transparent")
         info_frame.pack(side="left", fill="x", expand=True, pady=10)
 
-        ctk.CTkLabel(info_frame, text=prod.nombre, font=ctk.CTkFont(weight="bold", size=14)).pack(anchor="w")
-        cat_name = prod.nombre_categoria if prod.nombre_categoria else "Sin asignar"
-        ctk.CTkLabel(info_frame, text=f"Etiqueta YOLO: {prod.yolo_label} | Categoría: {cat_name}", text_color="gray", font=ctk.CTkFont(size=12)).pack(anchor="w")
+        lbl_name = ctk.CTkLabel(info_frame, text="", font=ctk.CTkFont(weight="bold", size=14))
+        lbl_name.pack(anchor="w")
+        lbl_desc = ctk.CTkLabel(info_frame, text="", text_color="gray", font=ctk.CTkFont(size=12))
+        lbl_desc.pack(anchor="w")
 
-        # Right side (Prices, Stock, Buttons)
+        # Right side
         right_frame = ctk.CTkFrame(card, fg_color="transparent")
         right_frame.pack(side="right", padx=15, pady=10)
 
-        ctk.CTkLabel(right_frame, text=f"S/ {prod.precio:.2f}", font=ctk.CTkFont(weight="bold", size=16)).pack(anchor="e")
-        stock_color = "red" if prod.stock <= 5 else "gray"
-        ctk.CTkLabel(right_frame, text=f"Stock: {prod.stock}", text_color=stock_color, font=ctk.CTkFont(size=12)).pack(anchor="e")
+        lbl_price = ctk.CTkLabel(right_frame, text="", font=ctk.CTkFont(weight="bold", size=16))
+        lbl_price.pack(anchor="e")
+        lbl_stock = ctk.CTkLabel(right_frame, text="", font=ctk.CTkFont(size=12))
+        lbl_stock.pack(anchor="e")
 
         actions_frame = ctk.CTkFrame(right_frame, fg_color="transparent")
         actions_frame.pack(anchor="e", pady=(5,0))
 
-        btn_edit = ctk.CTkButton(actions_frame, text="✏️", width=30, height=30, fg_color="#1f538d", command=lambda: self.show_product_form(prod))
+        btn_edit = ctk.CTkButton(actions_frame, text="✏️", width=30, height=30, fg_color="#1f538d")
         btn_edit.pack(side="left", padx=2)
-        
-        btn_del = ctk.CTkButton(actions_frame, text="🗑️", width=30, height=30, fg_color="#C62828", command=lambda: self.confirm_delete_product(prod))
+        btn_del = ctk.CTkButton(actions_frame, text="🗑️", width=30, height=30, fg_color="#C62828")
         btn_del.pack(side="left", padx=2)
 
+        card.widgets = {
+            "name": lbl_name,
+            "desc": lbl_desc,
+            "price": lbl_price,
+            "stock": lbl_stock,
+            "btn_edit": btn_edit,
+            "btn_del": btn_del
+        }
         return card
+
+    def _update_card(self, card, prod: Product):
+        w = card.widgets
+        w["name"].configure(text=prod.nombre)
+        cat_name = prod.nombre_categoria if prod.nombre_categoria else "Sin asignar"
+        w["desc"].configure(text=f"Etiqueta YOLO: {prod.yolo_label} | Categoría: {cat_name}")
+        w["price"].configure(text=f"S/ {prod.precio:.2f}")
+        
+        stock_color = "red" if prod.stock <= 5 else "gray"
+        w["stock"].configure(text=f"Stock: {prod.stock}", text_color=stock_color)
+        
+        w["btn_edit"].configure(command=functools.partial(self.show_product_form, prod))
+        w["btn_del"].configure(command=functools.partial(self.confirm_delete_product, prod))
 
     def show_product_form(self, producto_editar: Product = None):
         modal = ctk.CTkToplevel(self)
@@ -223,7 +282,7 @@ class ProductsView(ctk.CTkFrame):
             def _on_complete(success: bool, msg: str):
                 if success:
                     self.after(0, modal.destroy)
-                    self.after(0, self.load_products)
+                    self.after(0, self.force_reload)
                 else:
                     self.after(0, lambda: lbl_status.configure(text=msg, text_color="red"))
                     self.after(0, lambda: btn_save.configure(state="normal"))
@@ -256,7 +315,7 @@ class ProductsView(ctk.CTkFrame):
             def _on_complete(success: bool, msg: str):
                 if success:
                     self.after(0, modal.destroy)
-                    self.after(0, self.load_products)
+                    self.after(0, self.force_reload)
                 else:
                     self.after(0, lambda: lbl_status.configure(text=msg))
                     self.after(0, lambda: btn_del.configure(state="normal"))

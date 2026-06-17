@@ -1,5 +1,6 @@
 import customtkinter as ctk
 import tkinter.messagebox as messagebox
+import functools
 from controllers.users_controller import UsersController
 from domain.models.user import User
 
@@ -7,6 +8,10 @@ class UsersView(ctk.CTkFrame):
     def __init__(self, master):
         super().__init__(master, fg_color="transparent")
         self.controller = UsersController()
+        
+        self.current_page = 1
+        self.cards_pool_activos = []
+        self.cards_pool_inactivos = []
 
         # Top section: Header and Stats
         self.top_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -51,24 +56,24 @@ class UsersView(ctk.CTkFrame):
             self.search_frame, placeholder_text="Buscar por nombre o correo...", width=300
         )
         self.search_entry.pack(side="left", padx=(0, 10))
-        self.search_entry.bind("<Return>", lambda e: self.load_users())
+        self.search_entry.bind("<Return>", lambda e: self.force_reload())
 
         self.btn_search = ctk.CTkButton(
             self.search_frame, text="Buscar", width=100,
-            command=self.load_users
+            command=self.force_reload
         )
         self.btn_search.pack(side="left", padx=(0, 10))
 
         self.btn_refresh = ctk.CTkButton(
             self.search_frame, text="Actualizar", width=100,
             fg_color="#FF5A1F", hover_color="#E64A19",
-            command=self.load_users
+            command=self.force_reload
         )
         self.btn_refresh.pack(side="left")
 
         # Tabview
         self.tabview = ctk.CTkTabview(self)
-        self.tabview.pack(expand=True, fill="both", padx=20, pady=(0, 20))
+        self.tabview.pack(expand=True, fill="both", padx=20, pady=(0, 10))
 
         self.tab_activos = self.tabview.add("Activos")
         self.tab_suspendidos = self.tabview.add("Suspendidos")
@@ -78,8 +83,37 @@ class UsersView(ctk.CTkFrame):
 
         self.scroll_suspendidos = ctk.CTkScrollableFrame(self.tab_suspendidos, fg_color="transparent")
         self.scroll_suspendidos.pack(expand=True, fill="both")
+        
+        # Pagination Area
+        self.pagination_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.pagination_frame.pack(fill="x", padx=20, pady=(0, 10))
+        
+        self.btn_prev = ctk.CTkButton(self.pagination_frame, text="<", width=30, command=self.prev_page)
+        self.btn_prev.pack(side="left", padx=5)
+
+        self.lbl_page = ctk.CTkLabel(self.pagination_frame, text="Página 1", text_color="gray")
+        self.lbl_page.pack(side="left", padx=10)
+
+        self.btn_next = ctk.CTkButton(self.pagination_frame, text=">", width=30, command=self.next_page)
+        self.btn_next.pack(side="left", padx=5)
+
+        self.loading_act_lbl = ctk.CTkLabel(self.scroll_activos, text="Cargando...")
+        self.loading_susp_lbl = ctk.CTkLabel(self.scroll_suspendidos, text="Cargando...")
 
         # Load data initially
+        self.load_users()
+
+    def force_reload(self):
+        self.current_page = 1
+        self.load_users()
+
+    def prev_page(self):
+        if self.current_page > 1:
+            self.current_page -= 1
+            self.load_users()
+
+    def next_page(self):
+        self.current_page += 1
         self.load_users()
 
     def create_stat_card(self, parent, title, value):
@@ -100,94 +134,151 @@ class UsersView(ctk.CTkFrame):
         self.stat_estrellas.value_label.configure(text=f"{estrellas} ⭐")
 
     def load_users(self):
-        # Clear containers
-        for widget in self.scroll_activos.winfo_children():
-            widget.destroy()
-        for widget in self.scroll_suspendidos.winfo_children():
-            widget.destroy()
+        # Hide all pooled cards
+        for card in self.cards_pool_activos:
+            card.pack_forget()
+        for card in self.cards_pool_inactivos:
+            card.pack_forget()
             
-        loading_act = ctk.CTkLabel(self.scroll_activos, text="Cargando...")
-        loading_act.pack(pady=20)
-        loading_susp = ctk.CTkLabel(self.scroll_suspendidos, text="Cargando...")
-        loading_susp.pack(pady=20)
+        self.loading_act_lbl.configure(text="Cargando...")
+        self.loading_act_lbl.pack(pady=20)
+        self.loading_susp_lbl.configure(text="Cargando...")
+        self.loading_susp_lbl.pack(pady=20)
+        
+        self.lbl_page.configure(text=f"Página {self.current_page}")
 
         search_query = self.search_entry.get().strip()
 
         def _on_success(activos: list[User], inactivos: list[User]):
-            self.after(0, lambda: self.render_users(activos, inactivos, loading_act, loading_susp))
+            self.after(0, lambda: self.render_users(activos, inactivos))
 
-        self.controller.load_users(search_query, _on_success)
+        self.controller.load_users(search_query, self.current_page, _on_success)
 
-    def render_users(self, activos, inactivos, lbl_act, lbl_susp):
-        lbl_act.destroy()
-        lbl_susp.destroy()
+    def render_users(self, activos, inactivos):
+        self.loading_act_lbl.pack_forget()
+        self.loading_susp_lbl.pack_forget()
         
-        if not activos:
-            ctk.CTkLabel(self.scroll_activos, text="No hay usuarios activos.", text_color="gray").pack(pady=20)
-        if not inactivos:
-            ctk.CTkLabel(self.scroll_suspendidos, text="No hay usuarios suspendidos.", text_color="gray").pack(pady=20)
+        # Check if empty
+        if not activos and not inactivos:
+            if self.current_page > 1:
+                self.current_page -= 1
+                self.after(0, lambda: messagebox.showinfo("Fin", "No hay más usuarios."))
+                self.load_users()
+            else:
+                self.loading_act_lbl.configure(text="No hay usuarios activos.")
+                self.loading_act_lbl.pack(pady=20)
+                self.loading_susp_lbl.configure(text="No hay usuarios suspendidos.")
+                self.loading_susp_lbl.pack(pady=20)
+                self.update_stats(0, 0, 0, 0)
+            return
+
+        if not activos and self.current_page == 1:
+            self.loading_act_lbl.configure(text="No hay usuarios activos.")
+            self.loading_act_lbl.pack(pady=20)
+            
+        if not inactivos and self.current_page == 1:
+            self.loading_susp_lbl.configure(text="No hay usuarios suspendidos.")
+            self.loading_susp_lbl.pack(pady=20)
 
         sum_saldo = 0.0
         sum_estrellas = 0
 
-        # Render Activos
-        for user in activos:
+        # Pool scaling - Activos
+        while len(self.cards_pool_activos) < len(activos):
+            self.cards_pool_activos.append(self._create_empty_card(self.scroll_activos))
+
+        for i, user in enumerate(activos):
             sum_saldo += user.saldo
             sum_estrellas += user.estrellas
-            self.create_user_card(user, self.scroll_activos).pack(fill="x", pady=5)
+            card = self.cards_pool_activos[i]
+            self._update_card(card, user)
+            card.pack(fill="x", pady=5)
 
-        # Render Inactivos
-        for user in inactivos:
-            self.create_user_card(user, self.scroll_suspendidos).pack(fill="x", pady=5)
+        # Pool scaling - Inactivos
+        while len(self.cards_pool_inactivos) < len(inactivos):
+            self.cards_pool_inactivos.append(self._create_empty_card(self.scroll_suspendidos))
 
-        total_activos = len(activos)
+        for i, user in enumerate(inactivos):
+            card = self.cards_pool_inactivos[i]
+            self._update_card(card, user)
+            card.pack(fill="x", pady=5)
+
+        total_activos = len(activos) # Nota: esto es por página, en app real el count vendría del backend
         total_suspendidos = len(inactivos)
         avg_saldo = sum_saldo / total_activos if total_activos > 0 else 0
 
         self.update_stats(total_activos, total_suspendidos, avg_saldo, sum_estrellas)
 
-    def create_user_card(self, user: User, parent_container):
+    def _create_empty_card(self, parent_container):
         card = ctk.CTkFrame(parent_container, corner_radius=8, fg_color="#2b2b2b")
         
-        # Initial circle
-        initial = user.nombre[0].upper() if user.nombre and user.nombre != 'Sin nombre' else "U"
-        circle = ctk.CTkFrame(card, width=40, height=40, corner_radius=20, fg_color="#FF5A1F" if user.activo else "gray")
+        circle = ctk.CTkFrame(card, width=40, height=40, corner_radius=20, fg_color="#FF5A1F")
         circle.pack(side="left", padx=15, pady=15)
         circle.pack_propagate(False)
-        ctk.CTkLabel(circle, text=initial, text_color="white", font=ctk.CTkFont(weight="bold")).place(relx=0.5, rely=0.5, anchor="center")
+        lbl_initial = ctk.CTkLabel(circle, text="U", text_color="white", font=ctk.CTkFont(weight="bold"))
+        lbl_initial.place(relx=0.5, rely=0.5, anchor="center")
 
-        # Info
         info_frame = ctk.CTkFrame(card, fg_color="transparent")
         info_frame.pack(side="left", fill="x", expand=True, pady=10)
 
-        ctk.CTkLabel(info_frame, text=user.nombre, font=ctk.CTkFont(weight="bold", size=14)).pack(anchor="w")
-        ctk.CTkLabel(info_frame, text=f"ID: {user.id_usuario} | {user.correo}", text_color="gray", font=ctk.CTkFont(size=12)).pack(anchor="w")
+        lbl_name = ctk.CTkLabel(info_frame, text="", font=ctk.CTkFont(weight="bold", size=14))
+        lbl_name.pack(anchor="w")
+        lbl_desc = ctk.CTkLabel(info_frame, text="", text_color="gray", font=ctk.CTkFont(size=12))
+        lbl_desc.pack(anchor="w")
 
-        # Status & Balances
         right_frame = ctk.CTkFrame(card, fg_color="transparent")
         right_frame.pack(side="right", padx=15, pady=10)
 
+        lbl_status = ctk.CTkLabel(right_frame, text="", font=ctk.CTkFont(weight="bold"))
+        lbl_status.pack(anchor="e")
+        lbl_balances = ctk.CTkLabel(right_frame, text="", font=ctk.CTkFont(size=12))
+        lbl_balances.pack(anchor="e")
+
+        btn_action = ctk.CTkButton(
+            right_frame, text="", width=80, height=24
+        )
+        btn_action.pack(anchor="e", pady=(5, 0))
+
+        card.widgets = {
+            "circle": circle,
+            "initial": lbl_initial,
+            "name": lbl_name,
+            "desc": lbl_desc,
+            "status": lbl_status,
+            "balances": lbl_balances,
+            "btn_action": btn_action
+        }
+        return card
+
+    def _update_card(self, card, user: User):
+        w = card.widgets
+        
+        initial = user.nombre[0].upper() if user.nombre and user.nombre != 'Sin nombre' else "U"
+        w["circle"].configure(fg_color="#FF5A1F" if user.activo else "gray")
+        w["initial"].configure(text=initial)
+        
+        w["name"].configure(text=user.nombre)
+        w["desc"].configure(text=f"ID: {user.id_usuario} | {user.correo}")
+        
         status_text = "Activo" if user.activo else "Suspendido"
         status_color = "green" if user.activo else "red"
-        ctk.CTkLabel(right_frame, text=status_text, text_color=status_color, font=ctk.CTkFont(weight="bold")).pack(anchor="e")
-        ctk.CTkLabel(right_frame, text=f"S/ {user.saldo:.2f} | {user.estrellas} ⭐", font=ctk.CTkFont(size=12)).pack(anchor="e")
-
-        if user.activo and user.id_usuario != 'N/A':
-            btn_suspender = ctk.CTkButton(
-                right_frame, text="Suspender", width=80, height=24,
-                fg_color="red", hover_color="#8B0000",
-                command=lambda u=user.id_usuario: self.suspender_usuario(u)
-            )
-            btn_suspender.pack(anchor="e", pady=(5, 0))
-        elif not user.activo and user.id_usuario != 'N/A':
-            btn_activar = ctk.CTkButton(
-                right_frame, text="Activar", width=80, height=24,
-                fg_color="green", hover_color="#006400",
-                command=lambda u=user.id_usuario: self.reactivar_usuario(u)
-            )
-            btn_activar.pack(anchor="e", pady=(5, 0))
-
-        return card
+        w["status"].configure(text=status_text, text_color=status_color)
+        w["balances"].configure(text=f"S/ {user.saldo:.2f} | {user.estrellas} ⭐")
+        
+        if user.id_usuario != 'N/A':
+            w["btn_action"].pack(anchor="e", pady=(5, 0))
+            if user.activo:
+                w["btn_action"].configure(
+                    text="Suspender", fg_color="red", hover_color="#8B0000",
+                    command=functools.partial(self.suspender_usuario, user.id_usuario)
+                )
+            else:
+                w["btn_action"].configure(
+                    text="Activar", fg_color="green", hover_color="#006400",
+                    command=functools.partial(self.reactivar_usuario, user.id_usuario)
+                )
+        else:
+            w["btn_action"].pack_forget()
 
     def suspender_usuario(self, uid):
         def _on_complete(success: bool, msg: str):
@@ -208,4 +299,3 @@ class UsersView(ctk.CTkFrame):
                 self.after(0, lambda: messagebox.showerror("Error", f"Error al activar: {msg}"))
 
         self.controller.reactivar_usuario(uid, _on_complete)
-

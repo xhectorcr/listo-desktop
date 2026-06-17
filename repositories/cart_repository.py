@@ -33,7 +33,7 @@ class CartRepository:
 
     def finalizar_compra(self, usuario_id: str) -> bool:
         try:
-            self.http_client.post("/carrito/finalizar", json_data=usuario_id, timeout=5)
+            self.http_client.post("/carrito/finalizar", json_data=int(usuario_id), timeout=5)
             return True
         except AppException as e:
             print("Error al finalizar compra:", e.message)

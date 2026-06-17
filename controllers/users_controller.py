@@ -8,10 +8,10 @@ class UsersController:
     def __init__(self, user_service: UserService = None):
         self.service = user_service or UserService()
 
-    def load_users(self, search_query: str, on_success: Callable[[List[User], List[User]], None]):
+    def load_users(self, search_query: str, page: int, on_success: Callable[[List[User], List[User]], None]):
         """Carga usuarios activos e inactivos de manera asíncrona."""
         def _fetch_task():
-            activos, inactivos = self.service.obtener_resumen_usuarios(search_query)
+            activos, inactivos = self.service.obtener_resumen_usuarios(search_query, page=page, size=15)
             on_success(activos, inactivos)
         
         threading.Thread(target=_fetch_task, daemon=True).start()

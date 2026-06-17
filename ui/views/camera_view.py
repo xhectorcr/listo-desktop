@@ -1,5 +1,5 @@
 import customtkinter as ctk
-from PIL import Image
+from PIL import Image, ImageTk
 import cv2
 import threading
 import time
@@ -23,6 +23,7 @@ class CameraView(ctk.CTkFrame):
         self.cap = None
         self.running = False
         self.processed_ids = {}
+        self.current_image = None  # Cache for PhotoImage
 
         self.main_container = ctk.CTkFrame(self, fg_color="transparent")
         self.main_container.pack(expand=True, fill="both", padx=20, pady=20)
@@ -291,6 +292,7 @@ class CameraView(ctk.CTkFrame):
             if self.cap:
                 self.cap.release()
                 self.cap = None
+            self.current_image = None
             self.video_label.configure(image="")
 
     def update_ui(self):
@@ -301,8 +303,14 @@ class CameraView(ctk.CTkFrame):
             try:
                 annotated_frame_rgb = cv2.cvtColor(self.latest_annotated, cv2.COLOR_BGR2RGB)
                 pil_image = Image.fromarray(annotated_frame_rgb)
-                ctk_image = ctk.CTkImage(light_image=pil_image, dark_image=pil_image, size=(640, 480))
-                self.video_label.configure(image=ctk_image, text="")
+                if pil_image.size != (640, 480):
+                    pil_image = pil_image.resize((640, 480))
+                
+                if self.current_image is None:
+                    self.current_image = ImageTk.PhotoImage(image=pil_image)
+                    self.video_label.configure(image=self.current_image, text="")
+                else:
+                    self.current_image.paste(pil_image)
                 
                 if hasattr(self, 'backend_users') and self.backend_users:
                     users_text = ""
@@ -317,7 +325,10 @@ class CameraView(ctk.CTkFrame):
                                 break
                         
                         # In real scenario we would fetch real time cart contents or keep it out
-                        carrito_text = "Carrito activo" 
+                        if hasattr(user, 'carrito') and user.carrito:
+                            carrito_text = f"Carrito: {', '.join(user.carrito)}"
+                        else:
+                            carrito_text = "Carrito vacío"
                         
                         if assigned_track is not None:
                             users_text += f"> {nombre} (ID: {uid}) - Track: {assigned_track} | {carrito_text}\n"

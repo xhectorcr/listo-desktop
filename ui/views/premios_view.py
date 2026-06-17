@@ -1,4 +1,6 @@
 import customtkinter as ctk
+import tkinter.messagebox as messagebox
+import functools
 from controllers.rewards_controller import RewardsController
 from domain.models.user import User
 
@@ -9,6 +11,8 @@ class PremiosView(ctk.CTkFrame):
         
         self.sent_coupons = 14 # Simulation count
         self.sending_states = {}
+        self.current_page = 1
+        self.cards_pool = []
 
         # Top section: Header
         self.top_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -38,7 +42,7 @@ class PremiosView(ctk.CTkFrame):
         self.stat_enviados = self.create_stat_card(self.stats_frame, "Cupones Enviados", str(self.sent_coupons))
         self.stat_enviados.pack(side="left", expand=True, fill="x", padx=10)
 
-        self.stat_clientes = self.create_stat_card(self.stats_frame, "Clientes Registrados", "0")
+        self.stat_clientes = self.create_stat_card(self.stats_frame, "Clientes en Vista", "0")
         self.stat_clientes.pack(side="left", expand=True, fill="x", padx=(10, 0))
 
         # Manual send frame
@@ -61,8 +65,33 @@ class PremiosView(ctk.CTkFrame):
 
         # List Area
         self.scroll_frame = ctk.CTkScrollableFrame(self)
-        self.scroll_frame.pack(expand=True, fill="both", padx=20, pady=(0, 20))
+        self.scroll_frame.pack(expand=True, fill="both", padx=20, pady=(0, 10))
 
+        # Pagination Area
+        self.pagination_frame = ctk.CTkFrame(self, fg_color="transparent")
+        self.pagination_frame.pack(fill="x", padx=20, pady=(0, 10))
+        
+        self.btn_prev = ctk.CTkButton(self.pagination_frame, text="<", width=30, command=self.prev_page)
+        self.btn_prev.pack(side="left", padx=5)
+
+        self.lbl_page = ctk.CTkLabel(self.pagination_frame, text="Página 1", text_color="gray")
+        self.lbl_page.pack(side="left", padx=10)
+
+        self.btn_next = ctk.CTkButton(self.pagination_frame, text=">", width=30, command=self.next_page)
+        self.btn_next.pack(side="left", padx=5)
+
+        self.loading_lbl = ctk.CTkLabel(self.scroll_frame, text="Cargando clientes...")
+
+        # Load data initially
+        self.load_users()
+
+    def prev_page(self):
+        if self.current_page > 1:
+            self.current_page -= 1
+            self.load_users()
+
+    def next_page(self):
+        self.current_page += 1
         self.load_users()
 
     def create_stat_card(self, parent, title, value):
@@ -77,43 +106,56 @@ class PremiosView(ctk.CTkFrame):
         return frame
 
     def load_users(self):
-        for widget in self.scroll_frame.winfo_children():
-            widget.destroy()
+        for card in self.cards_pool:
+            card.pack_forget()
             
-        loading_lbl = ctk.CTkLabel(self.scroll_frame, text="Cargando clientes...")
-        loading_lbl.pack(pady=20)
+        self.loading_lbl.configure(text="Cargando clientes...")
+        self.loading_lbl.pack(pady=20)
+        self.lbl_page.configure(text=f"Página {self.current_page}")
 
         def _on_success(users: list[User]):
-            self.after(0, lambda: self.render_users(users, loading_lbl))
+            self.after(0, lambda: self.render_users(users))
 
-        self.controller.load_users(_on_success)
+        self.controller.load_users(self.current_page, _on_success)
 
-    def render_users(self, users: list[User], loading_lbl):
-        loading_lbl.destroy()
-        
+    def render_users(self, users: list[User]):
+        self.loading_lbl.pack_forget()
         self.stat_clientes.value_label.configure(text=str(len(users)))
 
         if not users:
-            ctk.CTkLabel(self.scroll_frame, text="No hay clientes registrados.", text_color="gray").pack(pady=20)
+            if self.current_page > 1:
+                self.current_page -= 1
+                self.after(0, lambda: messagebox.showinfo("Fin", "No hay más clientes."))
+                self.load_users()
+            else:
+                self.loading_lbl.configure(text="No hay clientes registrados.")
+                self.loading_lbl.pack(pady=20)
             return
 
-        for user in users:
-            self.create_user_card(user).pack(fill="x", pady=5)
+        while len(self.cards_pool) < len(users):
+            self.cards_pool.append(self._create_empty_card())
 
-    def create_user_card(self, user: User):
+        for i, user in enumerate(users):
+            card = self.cards_pool[i]
+            self._update_card(card, user)
+            card.pack(fill="x", pady=5)
+
+    def _create_empty_card(self):
         card = ctk.CTkFrame(self.scroll_frame, corner_radius=8, fg_color="#2b2b2b")
         
-        initial = user.nombre[0].upper() if user.nombre and user.nombre != 'Sin nombre' else "C"
         circle = ctk.CTkFrame(card, width=40, height=40, corner_radius=20, fg_color="#FF5A1F")
         circle.pack(side="left", padx=15, pady=15)
         circle.pack_propagate(False)
-        ctk.CTkLabel(circle, text=initial, text_color="white", font=ctk.CTkFont(weight="bold")).place(relx=0.5, rely=0.5, anchor="center")
+        lbl_initial = ctk.CTkLabel(circle, text="C", text_color="white", font=ctk.CTkFont(weight="bold"))
+        lbl_initial.place(relx=0.5, rely=0.5, anchor="center")
 
         info_frame = ctk.CTkFrame(card, fg_color="transparent")
         info_frame.pack(side="left", fill="x", expand=True, pady=10)
 
-        ctk.CTkLabel(info_frame, text=user.nombre, font=ctk.CTkFont(weight="bold", size=14)).pack(anchor="w")
-        ctk.CTkLabel(info_frame, text=f"{user.correo} | {user.estrellas} ⭐", text_color="gray", font=ctk.CTkFont(size=12)).pack(anchor="w")
+        lbl_name = ctk.CTkLabel(info_frame, text="", font=ctk.CTkFont(weight="bold", size=14))
+        lbl_name.pack(anchor="w")
+        lbl_desc = ctk.CTkLabel(info_frame, text="", text_color="gray", font=ctk.CTkFont(size=12))
+        lbl_desc.pack(anchor="w")
 
         right_frame = ctk.CTkFrame(card, fg_color="transparent")
         right_frame.pack(side="right", padx=15, pady=10)
@@ -128,27 +170,51 @@ class PremiosView(ctk.CTkFrame):
         )
         btn_send.pack(side="bottom")
 
-        def send_to_user():
-            uid = user.id_usuario
-            if self.sending_states.get(uid): return
-            self.sending_states[uid] = True
-            btn_send.configure(state="disabled", text="Enviando...")
-            lbl_status.configure(text="")
-
-            def _on_complete(success: bool, msg: str):
-                self.sending_states[uid] = False
-                if success:
-                    self.after(0, lambda: btn_send.configure(text="¡Enviado!", fg_color="green"))
-                    self.sent_coupons += 1
-                    self.after(0, lambda: self.stat_enviados.value_label.configure(text=str(self.sent_coupons)))
-                else:
-                    self.after(0, lambda: btn_send.configure(state="normal", text="Reintentar"))
-                    self.after(0, lambda: lbl_status.configure(text="Falló el envío", text_color="red"))
-
-            self.controller.send_coupon(user.correo, _on_complete)
-
-        btn_send.configure(command=send_to_user)
+        card.widgets = {
+            "initial": lbl_initial,
+            "name": lbl_name,
+            "desc": lbl_desc,
+            "status": lbl_status,
+            "btn_send": btn_send
+        }
         return card
+
+    def _update_card(self, card, user: User):
+        w = card.widgets
+        initial = user.nombre[0].upper() if user.nombre and user.nombre != 'Sin nombre' else "C"
+        w["initial"].configure(text=initial)
+        w["name"].configure(text=user.nombre)
+        w["desc"].configure(text=f"{user.correo} | {user.estrellas} ⭐")
+        w["status"].configure(text="")
+
+        uid = user.id_usuario
+        if self.sending_states.get(uid):
+            w["btn_send"].configure(state="disabled", text="Enviando...", fg_color="#1f538d")
+        else:
+            w["btn_send"].configure(
+                state="normal", text="🎁 Enviar Cupón", fg_color="#1f538d",
+                command=functools.partial(self.send_to_user, user, w["btn_send"], w["status"])
+            )
+
+    def send_to_user(self, user: User, btn_send, lbl_status):
+        uid = user.id_usuario
+        if self.sending_states.get(uid): return
+        
+        self.sending_states[uid] = True
+        btn_send.configure(state="disabled", text="Enviando...")
+        lbl_status.configure(text="")
+
+        def _on_complete(success: bool, msg: str):
+            self.sending_states[uid] = False
+            if success:
+                self.after(0, lambda: btn_send.configure(text="¡Enviado!", fg_color="green"))
+                self.sent_coupons += 1
+                self.after(0, lambda: self.stat_enviados.value_label.configure(text=str(self.sent_coupons)))
+            else:
+                self.after(0, lambda: btn_send.configure(state="normal", text="Reintentar"))
+                self.after(0, lambda: lbl_status.configure(text="Falló el envío", text_color="red"))
+
+        self.controller.send_coupon(user.correo, _on_complete)
 
     def send_manual(self):
         email = self.ent_email_manual.get().strip()

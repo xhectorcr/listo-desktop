@@ -6,10 +6,10 @@ class UserService:
     def __init__(self, user_repository: UserRepository = None):
         self.repository = user_repository or UserRepository()
 
-    def obtener_resumen_usuarios(self, search: str = "") -> Tuple[List[User], List[User]]:
+    def obtener_resumen_usuarios(self, search: str = "", page: int = 1, size: int = 15) -> Tuple[List[User], List[User]]:
         """Devuelve una tupla con (usuarios_activos, usuarios_inactivos)"""
-        activos = self.repository.get_usuarios_activos(page=1, size=100, search=search)
-        inactivos = self.repository.get_usuarios_inactivos(search=search)
+        activos = self.repository.get_usuarios_activos(page=page, size=size, search=search)
+        inactivos = self.repository.get_usuarios_inactivos(page=page, size=size, search=search)
         return activos, inactivos
 
     def suspender(self, usuario_id: str) -> Tuple[bool, str]:

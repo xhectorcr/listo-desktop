@@ -9,10 +9,10 @@ class ProductsController:
         self.product_service = product_service or ProductService()
         self.category_service = category_service or CategoryService()
 
-    def load_data(self, on_success: Callable[[List[Product], List[Category]], None]):
-        """Carga productos y categorías en paralelo/secuencial de forma asíncrona."""
+    def load_data(self, page: int, on_success: Callable[[List[Product], List[Category]], None]):
+        """Carga productos y categorías de forma asíncrona usando paginación."""
         def _fetch():
-            products = self.product_service.get_all_products()
+            products = self.product_service.get_all_products(page=page, size=15)
             categories = self.category_service.get_all_categories()
             on_success(products, categories)
         threading.Thread(target=_fetch, daemon=True).start()

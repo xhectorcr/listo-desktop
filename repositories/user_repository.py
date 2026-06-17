@@ -16,9 +16,9 @@ class UserRepository:
         except AppException:
             return []
 
-    def get_usuarios_inactivos(self, search: str = "") -> List[User]:
+    def get_usuarios_inactivos(self, page: int = 1, size: int = 50, search: str = "") -> List[User]:
         try:
-            params = {"pSearch": search}
+            params = {"pageNumber": page, "pageSize": size, "pSearch": search}
             response = self.http_client.get("/usuario/lista/inactivos", params=params)
             data = response.get("data", [])
             return [User.from_dict(u, default_activo=False) for u in data]
