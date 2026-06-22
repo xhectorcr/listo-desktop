@@ -29,21 +29,47 @@ class CameraView(ctk.CTkFrame):
         self.main_container.pack(expand=True, fill="both", padx=20, pady=20)
         
         # Cámara (Izquierda)
-        self.video_label = ctk.CTkLabel(self.main_container, text="")
-        self.video_label.pack(side="left", expand=True, fill="both")
+        self.video_label = ctk.CTkLabel(self.main_container, text="", width=960, height=540)
+        self.video_label.pack(side="left", padx=10, pady=10)
         
         # Panel (Derecha)
-        self.right_panel = ctk.CTkFrame(self.main_container, width=250)
+        self.right_panel = ctk.CTkFrame(self.main_container, width=300)
         self.right_panel.pack(side="right", fill="y", padx=(20, 0))
         
         self.lbl_title_users = ctk.CTkLabel(self.right_panel, text="Usuarios en Tienda", font=("Arial", 16, "bold"))
         self.lbl_title_users.pack(pady=10)
         
-        self.lbl_active_users = ctk.CTkLabel(self.right_panel, text="Ninguno", justify="left")
-        self.lbl_active_users.pack(pady=10, padx=10, fill="x")
+        self.users_frame = ctk.CTkScrollableFrame(self.right_panel, width=250, height=300)
+        self.users_frame.pack(pady=10, padx=10, fill="both", expand=True)
+
+        self.lbl_active_users = ctk.CTkLabel(self.users_frame, text="Ninguno", justify="left", anchor="nw")
+        self.lbl_active_users.pack(pady=5, padx=5, fill="both", expand=True)
+
+        self.camera_var = ctk.StringVar(value="Buscando...")
+        self.camera_selector = ctk.CTkOptionMenu(self.right_panel, variable=self.camera_var, values=["Buscando..."])
+        self.camera_selector.pack(pady=10)
 
         self.btn_toggle_cam = ctk.CTkButton(self.right_panel, text="Encender Cámara", command=self.toggle_camera)
         self.btn_toggle_cam.pack(pady=10)
+
+        def check_cameras():
+            available = []
+            api = cv2.CAP_DSHOW if platform.system() == "Windows" else cv2.CAP_ANY
+            for i in range(4):
+                cap = cv2.VideoCapture(i, api)
+                if cap.isOpened():
+                    ret, _ = cap.read()
+                    if ret:
+                        available.append(f"Cámara {i}")
+                cap.release()
+            
+            if not available:
+                available = ["Cámara 0", "Cámara 1", "Cámara 2", "Cámara 3"]
+            
+            self.after(0, lambda: self.camera_selector.configure(values=available))
+            self.after(0, lambda: self.camera_var.set(available[0]))
+            
+        threading.Thread(target=check_cameras, daemon=True).start()
 
         self.btn_limpiar = ctk.CTkButton(
             self.right_panel, text="Limpiar Tienda", 
@@ -59,6 +85,17 @@ class CameraView(ctk.CTkFrame):
                 self.after(0, lambda: messagebox.showinfo("Éxito", "La tienda ha sido limpiada."))
                 if hasattr(self, 'track_to_user_map'):
                     self.track_to_user_map.clear()
+                if hasattr(self, 'backend_users'):
+                    self.backend_users = []
+                if hasattr(self, 'active_tracks'):
+                    self.active_tracks.clear()
+                if hasattr(self, 'notified_users'):
+                    self.notified_users.clear()
+                if hasattr(self, 'product_states'):
+                    self.product_states.clear()
+                if hasattr(self, 'finished_tracks'):
+                    self.finished_tracks.clear()
+                self.after(0, lambda: self.lbl_active_users.configure(text="Ninguno"))
             else:
                 print("Error al limpiar tienda.")
                 self.after(0, lambda: messagebox.showerror("Error", "No se pudo limpiar la tienda."))
@@ -68,11 +105,16 @@ class CameraView(ctk.CTkFrame):
         if not self.running:
             self.running = True
             self.btn_toggle_cam.configure(text="Apagar Cámara", fg_color="#C62828", hover_color="#B71C1C")
-            
+            cam_idx_str = self.camera_var.get()
+            try:
+                cam_idx = int(cam_idx_str.split(" ")[1])
+            except:
+                cam_idx = 0
+                
             api = cv2.CAP_DSHOW if platform.system() == "Windows" else cv2.CAP_ANY
-            self.cap = cv2.VideoCapture(0, api)
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            self.cap = cv2.VideoCapture(cam_idx, api)
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 960)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 540)
             
             self.latest_frame = None
             self.latest_annotated = None
@@ -110,9 +152,9 @@ class CameraView(ctk.CTkFrame):
                             results = self.model.track(frame_copy, persist=True, tracker="bytetrack.yaml", verbose=False)
                             annotated_frame = frame_copy.copy()
                             
-                            # Dibujar línea de salida (X = 500)
-                            cv2.line(annotated_frame, (500, 0), (500, 480), (0, 0, 255), 2)
-                            cv2.putText(annotated_frame, "SALIDA", (510, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
+                            # Dibujar línea de salida (X = 850)
+                            cv2.line(annotated_frame, (850, 0), (850, 540), (0, 0, 255), 2)
+                            cv2.putText(annotated_frame, "SALIDA", (860, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
                             
                             self.latest_annotated = annotated_frame
                             
@@ -163,7 +205,7 @@ class CameraView(ctk.CTkFrame):
 
                                         # Paso 10: Salida de la tienda
                                         center_x = (bbox[0] + bbox[2]) / 2
-                                        if center_x > 500 and track_id not in self.finished_tracks:
+                                        if center_x > 850 and track_id not in self.finished_tracks:
                                             self.finished_tracks.add(track_id)
                                             usuario_id = self.track_to_user_map.get(track_id)
                                             if usuario_id:
@@ -303,14 +345,14 @@ class CameraView(ctk.CTkFrame):
             try:
                 annotated_frame_rgb = cv2.cvtColor(self.latest_annotated, cv2.COLOR_BGR2RGB)
                 pil_image = Image.fromarray(annotated_frame_rgb)
-                if pil_image.size != (640, 480):
-                    pil_image = pil_image.resize((640, 480))
+                if pil_image.size != (960, 540):
+                    pil_image = pil_image.resize((960, 540))
                 
                 if self.current_image is None:
-                    self.current_image = ImageTk.PhotoImage(image=pil_image)
+                    self.current_image = ctk.CTkImage(light_image=pil_image, size=(960, 540))
                     self.video_label.configure(image=self.current_image, text="")
                 else:
-                    self.current_image.paste(pil_image)
+                    self.current_image.configure(light_image=pil_image)
                 
                 if hasattr(self, 'backend_users') and self.backend_users:
                     users_text = ""
